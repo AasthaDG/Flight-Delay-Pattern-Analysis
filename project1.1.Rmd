@@ -1,0 +1,322 @@
+
+```{r}
+library(dplyr)
+library(readr)
+```
+
+```{r}
+#importing data
+flights <- read_csv("D:\DS_SEM_II\SDM_II\flights.csv")
+airlines <- read_csv("D:\DS_SEM_II\SDM_II\airlines.csv")
+airports <- read_csv("D:\DS_SEM_II\SDM_II\airports.csv")
+summary(flights)
+summary(airlines)
+summary(airports)
+```
+
+```{r}
+
+# Merge airline names into flights
+flights_merged <- flights %>%
+  left_join(airlines, by = c("AIRLINE" = "IATA_CODE"))
+
+
+# Merge origin airport details
+flights_merged <- flights_merged %>%
+  left_join(airports, by = c("ORIGIN_AIRPORT" = "IATA_CODE")) %>%
+  rename(ORIGIN_AIRPORT_NAME = AIRPORT,
+         ORIGIN_CITY = CITY,
+         ORIGIN_STATE = STATE,
+         ORIGIN_LATITUDE = LATITUDE,
+         ORIGIN_LONGITUDE = LONGITUDE)
+
+# Merge destination airport details
+flights_merged <- flights_merged %>%
+  left_join(airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE")) %>%
+  rename(DEST_AIRPORT_NAME = AIRPORT,
+         DEST_CITY = CITY,
+         DEST_STATE = STATE,
+         DEST_LATITUDE = LATITUDE,
+         DEST_LONGITUDE = LONGITUDE)
+
+# Check structure of the final merged dataset
+glimpse(flights_merged)
+```
+```{r}
+summary(flights_merged[, c("ARRIVAL_DELAY", "DEPARTURE_DELAY", "DISTANCE", "AIR_TIME")])
+
+```
+
+```{r}
+
+install.packages("naniar")
+library(naniar)
+library(ggplot2)
+
+# Count missing values per column
+miss_var_summary(flights_merged)
+
+# Visual missing data
+gg_miss_var(flights_merged, show_pct = TRUE) +
+  labs(
+    title = "Missing Data per Variable in Flights Dataset",
+    subtitle = "Percent and count of missing values shown",
+    x = "No of Missing Values",
+    y = "Variables"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 5, face = "bold"),
+    plot.title = element_text(face = "bold", size = 10),
+    plot.subtitle = element_text(size = 10, margin = margin(b = 10))
+  )
+
+```
+```{r}
+# Dropping Cancelled and diverted flights
+flights_filtered <- flights_merged %>%
+  filter(CANCELLED == 0, DIVERTED == 0)
+
+```
+
+```{r}
+
+# Plot ARRIVAL_DELAY as vertical boxplot with limits
+ggplot(flights_filtered, aes(y = ARRIVAL_DELAY)) +
+  geom_boxplot(fill = "steelblue", outlier.colour = "red", outlier.alpha = 0.5) +
+  coord_cartesian(ylim = c(-50, 200)) +  # Adjust to exclude extreme outliers
+  labs(
+    title = "Arrival Delay Distribution (Filtered)",
+    y = "Arrival Delay (minutes)",
+    x = ""
+  ) +
+  theme_minimal(base_size = 14)
+
+# Negative values depict early departures
+
+ggplot(flights_filtered, aes(y = DEPARTURE_DELAY)) +
+  geom_boxplot(fill = "orange", outlier.colour = "red", outlier.alpha = 0.5) +
+  coord_cartesian(ylim = c(-50, 200)) +  # adjust to focus on reasonable delay range
+  labs(
+    title = "Departure Delay Distribution (Filtered)",
+    y = "Departure Delay (minutes)",
+    x = ""
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+```{r}
+flights_filtered %>%
+  group_by(AIRLINE.y) %>%
+  summarise(
+    mean_arrival_delay = mean(ARRIVAL_DELAY, na.rm = TRUE),
+    mean_departure_delay = mean(DEPARTURE_DELAY, na.rm = TRUE),
+    num_flights = n()
+  ) %>%
+  arrange(desc(mean_arrival_delay)) %>%
+  slice_head(n = 10)
+
+```
+
+```{r}
+flights_filtered %>%
+  group_by(MONTH) %>%
+  summarise(
+    avg_arrival_delay = mean(ARRIVAL_DELAY, na.rm = TRUE),
+    avg_departure_delay = mean(DEPARTURE_DELAY, na.rm = TRUE)
+  ) %>%
+  ggplot(aes(x = MONTH)) +
+  geom_line(aes(y = avg_arrival_delay, color = "Arrival")) +
+  geom_line(aes(y = avg_departure_delay, color = "Departure")) +
+  labs(title = "Average Delay by Month", x = "Month", y = "Delay (min)") +
+  scale_color_manual(values = c("Arrival" = "steelblue", "Departure" = "orange")) +
+  theme_minimal()
+
+```
+
+```{r}
+flights_filtered %>%
+  group_by(ORIGIN_AIRPORT_NAME) %>%
+  summarise(
+    avg_departure_delay = mean(DEPARTURE_DELAY, na.rm = TRUE),
+    total_flights = n()
+  ) %>%
+  filter(total_flights > 1000) %>%
+  arrange(desc(avg_departure_delay)) %>%
+  slice_head(n = 10)
+
+```
+
+```{r}
+ggplot(flights_filtered %>% filter(ARRIVAL_DELAY >= -60, ARRIVAL_DELAY <= 180), 
+       aes(x = ARRIVAL_DELAY)) +
+  geom_histogram(binwidth = 5, fill = "tomato", color = "white", alpha = 0.8) +
+  labs(
+    title = "Histogram of Arrival Delays - Early Arrival/ Delays upto 3 hours",
+    x = "Arrival Delay (minutes)",
+    y = "Flight Count"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+#PCA
+library(tidyr)
+delay_pca_data <- flights_merged %>%
+  filter(CANCELLED == 0, DIVERTED == 0) %>%
+  select(AIR_SYSTEM_DELAY, SECURITY_DELAY, AIRLINE_DELAY, 
+         LATE_AIRCRAFT_DELAY, WEATHER_DELAY, ARRIVAL_DELAY) %>%
+  drop_na()
+
+```
+
+
+```{r}
+delay_scaled <- scale(delay_pca_data)
+pca_result <- prcomp(delay_scaled, center = TRUE, scale. = TRUE)
+summary(pca_result)       # Check variance explained
+
+```
+
+```{r}
+scree_df <- data.frame(
+  PC = paste0("PC", 1:length(pca_result$sdev)),
+  Variance = (pca_result$sdev)^2 / sum((pca_result$sdev)^2)
+)
+
+ggplot(scree_df, aes(x = PC, y = Variance)) +
+  geom_col(fill = "steelblue") +
+  geom_line(aes(group = 1), color = "black", linetype = "dashed") +
+  geom_point() +
+  labs(
+    title = "Scree Plot - PCA on Delay Components",
+    y = "Proportion of Variance Explained",
+    x = "Principal Component"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+
+```{r}
+pca_components <- as.data.frame(pca_result$x)  # Extract principal components
+
+# Add back the target
+pca_df <- bind_cols(pca_components, DELAYED = ifelse(delay_pca_data[, "ARRIVAL_DELAY"] > 15, 1, 0))
+```
+
+```{r}
+# We’ll use only the first 5 PCs
+pca_for_clustering <- pca_df %>%
+  select(PC1, PC2, PC3, PC4, PC5)
+
+set.seed(123)
+kmeans_result <- kmeans(pca_for_clustering, centers = 3, nstart = 25)
+
+# Add cluster labels to your data
+pca_df$cluster <- as.factor(kmeans_result$cluster)
+
+```
+
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "K-Means Clustering on PCA Components",
+       x = "Principal Component 1", y = "Principal Component 2") +
+  theme_minimal()
+
+```
+
+```{r}
+pca_result$rotation 
+```
+
+```{r}
+# Add back delays if you want to profile the clusters
+pca_df$ARRIVAL_DELAY <- delay_pca_data$ARRIVAL_DELAY
+
+# Average delay per cluster
+pca_df %>%
+  group_by(cluster) %>%
+  summarise(
+    mean_arrival_delay = mean(ARRIVAL_DELAY),
+    count = n()
+  )
+```
+
+```{r}
+
+# Time Series Forecasting of Average Arrival Delays using ARIMA
+library(forecast)    # For time series forecasting
+library(lubridate)   # For working with dates
+library(tseries)     # For ADF stationarity test
+library(fable)
+library(tsibble)
+library(feasts)
+
+# Step 1: Convert to a tsibble for better date handling
+monthly_delay_tsibble <- monthly_delay %>%
+  as_tsibble(index = flight_month)
+
+# Step 2: Fit ARIMA model using fable
+fit <- monthly_delay_tsibble %>%
+  model(ARIMA = ARIMA(avg_arrival_delay))
+
+# Step 3: Forecast the next 6 months
+forecast_data <- fit %>%
+  forecast(h = "6 months")
+
+# Step 4: Plot with proper date labels
+autoplot(forecast_data, monthly_delay_tsibble) +
+  labs(
+    title = "ARIMA Forecast of Monthly Arrival Delays",
+    subtitle = "With 80% and 95% confidence intervals",
+    x = "Month",
+    y = "Average Delay (minutes)"
+  ) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+```{r}
+# AIC/BIC Values
+cat("ARIMA AIC:", AIC(fit_arima), "\n")
+cat("ARIMA BIC:", BIC(fit_arima), "\n")
+
+```
+```{r}
+library(ggplot2)
+library(zoo)
+
+# Improved base R plot for ARIMA residuals
+res <- residuals(fit_arima)
+
+# Create data frame of residuals with time
+res_df <- data.frame(
+  Time = as.Date(as.yearmon(time(res))),
+  Residuals = as.numeric(res)
+)
+
+# Plot using ggplot2
+ggplot(res_df, aes(x = Time, y = Residuals)) +
+  geom_line(color = "blue", linewidth = 1.2) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "ARIMA Residuals Over Time",
+    x = "Month",
+    y = "Residuals"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+
+
+```
+
